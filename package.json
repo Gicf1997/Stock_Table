@@ -58,6 +58,8 @@
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^0.9.6",
     "zod": "^3.24.1",
+    "xlsx": "^0.18.5",
+    "html-to-image": "^1.11.11",
     "chart.js": "latest",
     "react-chartjs-2": "latest"
   },

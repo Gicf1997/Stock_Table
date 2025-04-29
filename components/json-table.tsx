@@ -19,6 +19,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Filter,
+  FileSpreadsheet,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -27,6 +28,7 @@ import { Separator } from "@/components/ui/separator"
 import { Label } from "@/components/ui/label"
 import { format, isValid } from "date-fns"
 import { es } from "date-fns/locale"
+import * as XLSX from "xlsx"
 
 interface JsonTableProps {
   data: any[]
@@ -59,58 +61,44 @@ export default function JsonTable({ data }: JsonTableProps) {
   // Inicializar columnas visibles si aún no se han establecido
   useMemo(() => {
     if (visibleColumns.length === 0 && allColumns.length > 0) {
-      // Mostrar solo las columnas más importantes por defecto
-      const defaultColumns = [
+      // Orden específico de columnas
+      const orderedColumns = [
+        "STORERKEY",
         "SKU",
+        "ALTSKU",
         "DESCR",
+        "PACKKEY",
+        "LOC",
         "QTY",
         "QTY_DISPO",
+        "QTYALLOCATED",
+        "QTYPICKED",
+        "PACKUOM3",
+        "NETWGT_DISPO",
         "STATUS",
-        "LOC",
+        "LOTTABLE01",
         "LOTTABLE02",
+        "LOTTABLE03",
+        "LOTTABLE04",
         "LOTTABLE05",
+        "LOTTABLE06",
+        "LOTTABLE07",
         "LOTTABLE08",
+        "LOTTABLE09",
+        "LOTTABLE10",
+        "LOTTABLE11",
+        "LOTTABLE12",
         "AGING_DIAS",
+        "LOT",
       ]
 
-      const initialColumns = allColumns.filter(
-        (col) => defaultColumns.includes(col) || col.includes("LOT") || col.includes("QTY") || col.includes("STATUS"),
-      )
+      // Filtrar columnas que existen en los datos
+      const availableColumns = orderedColumns.filter((col) => allColumns.includes(col))
 
-      // Si no hay columnas que coincidan con los criterios, mostrar las primeras 10
-      setVisibleColumns(initialColumns.length > 0 ? initialColumns : allColumns.slice(0, 10))
+      // Si no hay columnas disponibles que coincidan con el orden especificado, mostrar todas
+      setVisibleColumns(availableColumns.length > 0 ? availableColumns : allColumns)
     }
   }, [allColumns, visibleColumns])
-
-  // Datos para el gráfico de ubicaciones
-  const locationData = useMemo(() => {
-    // Agrupar por ubicación
-    const locationGroups: Record<string, number> = {}
-
-    data.forEach((item) => {
-      if (!item.LOC) return
-
-      // Verificar si LOC es una cadena antes de usar substring
-      const locationPrefix = typeof item.LOC === "string" ? item.LOC.substring(0, 3) : String(item.LOC)
-      const quantity = Number(item.QTY) || 0
-
-      locationGroups[locationPrefix] = (locationGroups[locationPrefix] || 0) + quantity
-    })
-
-    // Ordenar y limitar a 10 para mejor visualización
-    const sortedEntries = Object.entries(locationGroups)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-
-    const labels = sortedEntries.map(([name]) => name)
-    const values = sortedEntries.map(([, value]) => value)
-
-    return {
-      labels,
-      values,
-      raw: sortedEntries.map(([name, value]) => ({ name, value })),
-    }
-  }, [data])
 
   // Aplicar filtros a los datos
   const applyFilters = (item: any, filters: FilterConfig[]) => {
@@ -249,9 +237,8 @@ export default function JsonTable({ data }: JsonTableProps) {
       })
       .join("\n")
 
-    const csv = headers + "\n" + rows
-
     // Crear y descargar el archivo
+    const csv = headers + "\n" + rows
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
     const url = URL.createObjectURL(blob)
     const link = document.createElement("a")
@@ -261,6 +248,28 @@ export default function JsonTable({ data }: JsonTableProps) {
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
+  }
+
+  // Exportar datos a Excel
+  const exportToExcel = () => {
+    // Preparar los datos para Excel (solo columnas visibles)
+    const dataToExport = sortedData.map((item) => {
+      const newItem: Record<string, any> = {}
+      visibleColumns.forEach((col) => {
+        newItem[col] = item[col]
+      })
+      return newItem
+    })
+
+    // Crear una hoja de cálculo
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport)
+
+    // Crear un libro de trabajo y añadir la hoja
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Datos")
+
+    // Guardar el archivo
+    XLSX.writeFile(workbook, "datos_inventario.xlsx")
   }
 
   // Añadir filtro
@@ -336,6 +345,7 @@ export default function JsonTable({ data }: JsonTableProps) {
     return "string"
   }
 
+  // Añadir estilos de encabezado fijo a la tabla
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row justify-between gap-4">
@@ -476,43 +486,54 @@ export default function JsonTable({ data }: JsonTableProps) {
 
           <Button variant="outline" onClick={exportToCSV} className="flex gap-2">
             <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Exportar</span>
+            <span className="hidden sm:inline">CSV</span>
+          </Button>
+
+          <Button variant="outline" onClick={exportToExcel} className="flex gap-2">
+            <FileSpreadsheet className="h-4 w-4" />
+            <span className="hidden sm:inline">Excel</span>
           </Button>
         </div>
       </div>
 
-      <div className="rounded-md border overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {visibleColumns.map((column) => (
-                <TableHead key={column} className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort(column)}>
-                  <div className="flex items-center gap-1">
-                    {column}
-                    {sortConfig?.key === column && <span>{sortConfig.direction === "asc" ? "↑" : "↓"}</span>}
-                  </div>
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {paginatedData.length > 0 ? (
-              paginatedData.map((row, rowIndex) => (
-                <TableRow key={rowIndex} className="hover:bg-muted/50">
-                  {visibleColumns.map((column) => (
-                    <TableCell key={`${rowIndex}-${column}`}>{renderCellValue(row[column], column)}</TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : (
+      <div className="rounded-md border overflow-hidden">
+        <div className="overflow-x-auto max-h-[70vh]">
+          <Table>
+            <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow>
-                <TableCell colSpan={visibleColumns.length} className="h-24 text-center">
-                  No se encontraron datos
-                </TableCell>
+                {visibleColumns.map((column) => (
+                  <TableHead
+                    key={column}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => handleSort(column)}
+                  >
+                    <div className="flex items-center gap-1">
+                      {column}
+                      {sortConfig?.key === column && <span>{sortConfig.direction === "asc" ? "↑" : "↓"}</span>}
+                    </div>
+                  </TableHead>
+                ))}
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {paginatedData.length > 0 ? (
+                paginatedData.map((row, rowIndex) => (
+                  <TableRow key={rowIndex} className="hover:bg-muted/50">
+                    {visibleColumns.map((column) => (
+                      <TableCell key={`${rowIndex}-${column}`}>{renderCellValue(row[column], column)}</TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={visibleColumns.length} className="h-24 text-center">
+                    No se encontraron datos
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4">

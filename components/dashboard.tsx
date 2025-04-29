@@ -1,12 +1,14 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import type React from "react"
+
+import { useState, useMemo, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { isValid, differenceInDays, format } from "date-fns"
 import { es } from "date-fns/locale"
 import { Badge } from "@/components/ui/badge"
-import { AlertCircle, CheckCircle2, Clock } from "lucide-react"
+import { AlertCircle, CheckCircle2, Clock, Download, FileSpreadsheet } from "lucide-react"
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -25,6 +27,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import * as XLSX from "xlsx"
+import * as htmlToImage from "html-to-image"
 
 // Registrar los componentes de Chart.js
 ChartJS.register(
@@ -94,6 +98,13 @@ function getLocationPrefix(location: any): string {
 export default function Dashboard({ data }: DashboardProps) {
   const [activeTab, setActiveTab] = useState("resumen")
 
+  // Referencias para los gráficos
+  const expirationChartRef = useRef<HTMLDivElement>(null)
+  const familyChartRef = useRef<HTMLDivElement>(null)
+  const agingChartRef = useRef<HTMLDivElement>(null)
+  const locationChartRef = useRef<HTMLDivElement>(null)
+  const summaryChartsRef = useRef<HTMLDivElement>(null)
+
   // Filtros
   const [statusFilter, setStatusFilter] = useState<string>("TODOS")
   const [familyFilter, setFamilyFilter] = useState<string>("TODAS")
@@ -101,6 +112,10 @@ export default function Dashboard({ data }: DashboardProps) {
   const [minAgingFilter, setMinAgingFilter] = useState<string>("")
   const [maxAgingFilter, setMaxAgingFilter] = useState<string>("")
   const [limitItems, setLimitItems] = useState<number>(10)
+
+  // Nuevos filtros
+  const [skuFilter, setSkuFilter] = useState<string>("")
+  const [agingFilter, setAgingFilter] = useState<string>("TODOS")
 
   // Obtener valores únicos para filtros
   const uniqueStatuses = useMemo(() => {
@@ -114,7 +129,7 @@ export default function Dashboard({ data }: DashboardProps) {
   const uniqueFamilies = useMemo(() => {
     const families = new Set<string>()
     data.forEach((item) => {
-      if (item.LOTTABLE08) families.add(item.LOTTABLE08)
+      if (item.LOTTABLE07) families.add(item.LOTTABLE07)
     })
     return Array.from(families)
   }, [data])
@@ -133,37 +148,42 @@ export default function Dashboard({ data }: DashboardProps) {
   // Aplicar filtros a los datos
   const filteredData = useMemo(() => {
     return data.filter((item) => {
-      // Filtro por estado
-      if (statusFilter !== "TODOS" && item.STATUS !== statusFilter) {
+      // Filtro por SKU
+      if (skuFilter && !String(item.SKU).includes(skuFilter)) {
         return false
       }
 
       // Filtro por familia
-      if (familyFilter !== "TODAS" && item.LOTTABLE08 !== familyFilter) {
+      if (familyFilter !== "TODAS" && item.LOTTABLE07 !== familyFilter) {
         return false
       }
 
-      // Filtro por ubicación
-      if (locationFilter !== "TODOS" && item.LOC) {
-        const prefix = getLocationPrefix(item.LOC)
-        if (prefix !== locationFilter) {
-          return false
+      // Filtro por aging
+      if (agingFilter !== "TODOS") {
+        const agingDays = Number(item.AGING_DIAS) || 0
+
+        switch (agingFilter) {
+          case "< 7 días":
+            if (agingDays >= 7) return false
+            break
+          case "7-30 días":
+            if (agingDays < 7 || agingDays >= 30) return false
+            break
+          case "30-60 días":
+            if (agingDays < 30 || agingDays >= 60) return false
+            break
+          case "60-90 días":
+            if (agingDays < 60 || agingDays >= 90) return false
+            break
+          case "> 90 días":
+            if (agingDays < 90) return false
+            break
         }
-      }
-
-      // Filtro por aging mínimo
-      if (minAgingFilter && Number(item.AGING_DIAS) < Number(minAgingFilter)) {
-        return false
-      }
-
-      // Filtro por aging máximo
-      if (maxAgingFilter && Number(item.AGING_DIAS) > Number(maxAgingFilter)) {
-        return false
       }
 
       return true
     })
-  }, [data, statusFilter, familyFilter, locationFilter, minAgingFilter, maxAgingFilter])
+  }, [data, skuFilter, familyFilter, agingFilter])
 
   // Datos para el resumen
   const summaryData = useMemo(() => {
@@ -241,11 +261,11 @@ export default function Dashboard({ data }: DashboardProps) {
 
   // Datos para el gráfico de distribución por familia
   const familyDistribution = useMemo(() => {
-    // Agrupar por familia (LOTTABLE08)
+    // Agrupar por familia (LOTTABLE07)
     const familyGroups: Record<string, number> = {}
 
     filteredData.forEach((item) => {
-      const family = item.LOTTABLE08 || "SIN CLASIFICAR"
+      const family = item.LOTTABLE07 || "SIN CLASIFICAR"
       const quantity = Number(item.QTY) || 0
 
       familyGroups[family] = (familyGroups[family] || 0) + quantity
@@ -378,7 +398,83 @@ export default function Dashboard({ data }: DashboardProps) {
     },
   }
 
-  // Componente de filtros
+  // Función para exportar datos a Excel
+  const exportToExcel = () => {
+    // Crear una hoja de cálculo con los datos filtrados
+    const worksheet = XLSX.utils.json_to_sheet(filteredData)
+
+    // Crear un libro de trabajo y añadir la hoja
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Datos")
+
+    // Guardar el archivo
+    XLSX.writeFile(workbook, "datos_inventario.xlsx")
+  }
+
+  // Función para exportar gráficos a Excel
+  const exportChartsToExcel = async () => {
+    try {
+      // Crear un libro de trabajo
+      const workbook = XLSX.utils.book_new()
+
+      // Añadir hoja con datos filtrados
+      const worksheet = XLSX.utils.json_to_sheet(filteredData)
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Datos")
+
+      // Crear hojas para cada gráfico
+      const chartRefs = [
+        { ref: summaryChartsRef, name: "Resumen" },
+        { ref: expirationChartRef, name: "Vencimientos" },
+        { ref: familyChartRef, name: "Familias" },
+        { ref: agingChartRef, name: "Aging" },
+        { ref: locationChartRef, name: "Ubicaciones" },
+      ]
+
+      // Crear una hoja para los gráficos
+      const chartsWorksheet = XLSX.utils.aoa_to_sheet([
+        ["Gráficos del Dashboard"],
+        ["Generado el " + new Date().toLocaleString()],
+      ])
+
+      // Configurar ancho de columnas
+      const colWidths = [{ wch: 100 }] // Ancho para la columna A
+      chartsWorksheet["!cols"] = colWidths
+
+      // Añadir la hoja al libro
+      XLSX.utils.book_append_sheet(workbook, chartsWorksheet, "Gráficos")
+
+      // Guardar el archivo
+      XLSX.writeFile(workbook, "dashboard_inventario.xlsx")
+
+      // Notificar al usuario que debe exportar las imágenes por separado
+      alert(
+        "Los datos se han exportado a Excel. Para incluir gráficos, utilice el botón 'Exportar Gráfico' en cada sección.",
+      )
+    } catch (error) {
+      console.error("Error al exportar a Excel:", error)
+      alert("Ocurrió un error al exportar a Excel. Por favor, inténtelo de nuevo.")
+    }
+  }
+
+  // Función para exportar un gráfico específico como imagen
+  const exportChartAsImage = async (ref: React.RefObject<HTMLDivElement>, filename: string) => {
+    if (!ref.current) return
+
+    try {
+      const dataUrl = await htmlToImage.toPng(ref.current, { quality: 1.0 })
+
+      // Crear un enlace para descargar la imagen
+      const link = document.createElement("a")
+      link.download = `${filename}.png`
+      link.href = dataUrl
+      link.click()
+    } catch (error) {
+      console.error("Error al exportar el gráfico:", error)
+      alert("Ocurrió un error al exportar el gráfico. Por favor, inténtelo de nuevo.")
+    }
+  }
+
+  // Reemplazar el componente FilterControls con esta nueva versión que solo incluye filtros por SKU, Familia y Aging
   const FilterControls = () => (
     <Card className="mb-4">
       <CardHeader className="pb-2">
@@ -388,20 +484,13 @@ export default function Dashboard({ data }: DashboardProps) {
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="space-y-2">
-            <Label htmlFor="status-filter">Estado</Label>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger id="status-filter">
-                <SelectValue placeholder="Seleccionar estado" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="TODOS">Todos los estados</SelectItem>
-                {uniqueStatuses.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {status}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label htmlFor="sku-filter">SKU</Label>
+            <Input
+              id="sku-filter"
+              placeholder="Filtrar por SKU"
+              value={skuFilter}
+              onChange={(e) => setSkuFilter(e.target.value)}
+            />
           </div>
 
           <div className="space-y-2">
@@ -422,77 +511,88 @@ export default function Dashboard({ data }: DashboardProps) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="location-filter">Rack</Label>
-            <Select value={locationFilter} onValueChange={setLocationFilter}>
-              <SelectTrigger id="location-filter">
-                <SelectValue placeholder="Seleccionar rack" />
+            <Label htmlFor="aging-filter">Aging</Label>
+            <Select value={agingFilter} onValueChange={setAgingFilter}>
+              <SelectTrigger id="aging-filter">
+                <SelectValue placeholder="Seleccionar rango de aging" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="TODOS">Todos los racks</SelectItem>
-                {uniqueLocations.map((location) => (
-                  <SelectItem key={location} value={location}>
-                    {location}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="min-aging">Aging mínimo (días)</Label>
-            <Input
-              id="min-aging"
-              type="number"
-              value={minAgingFilter}
-              onChange={(e) => setMinAgingFilter(e.target.value)}
-              placeholder="Mínimo"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="max-aging">Aging máximo (días)</Label>
-            <Input
-              id="max-aging"
-              type="number"
-              value={maxAgingFilter}
-              onChange={(e) => setMaxAgingFilter(e.target.value)}
-              placeholder="Máximo"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="limit-items">Límite de elementos</Label>
-            <Select value={limitItems.toString()} onValueChange={(value) => setLimitItems(Number(value))}>
-              <SelectTrigger id="limit-items">
-                <SelectValue placeholder="Límite de elementos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="5">5 elementos</SelectItem>
-                <SelectItem value="10">10 elementos</SelectItem>
-                <SelectItem value="15">15 elementos</SelectItem>
-                <SelectItem value="20">20 elementos</SelectItem>
+                <SelectItem value="TODOS">Todos los rangos</SelectItem>
+                <SelectItem value="< 7 días">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-[#b3b1e6]"></div>
+                    <span>{"< 7 días"}</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="7-30 días">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-[#82ca9d]"></div>
+                    <span>7-30 días</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="30-60 días">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-[#ffc658]"></div>
+                    <span>30-60 días</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="60-90 días">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-[#ff8042]"></div>
+                    <span>60-90 días</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="> 90 días">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-[#0088fe]"></div>
+                    <span>{"> 90 días"}</span>
+                  </div>
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
         </div>
 
-        <div className="flex justify-end mt-4">
+        <div className="flex flex-wrap justify-end gap-2 mt-4">
           <Button
             variant="outline"
             onClick={() => {
-              setStatusFilter("TODOS")
+              setSkuFilter("")
               setFamilyFilter("TODAS")
-              setLocationFilter("TODOS")
-              setMinAgingFilter("")
-              setMaxAgingFilter("")
-              setLimitItems(10)
+              setAgingFilter("TODOS")
             }}
           >
             Limpiar filtros
           </Button>
+
+          <Button variant="outline" onClick={exportToExcel} className="flex items-center gap-2">
+            <FileSpreadsheet className="h-4 w-4" />
+            <span>Exportar a Excel</span>
+          </Button>
+
+          <Button variant="outline" onClick={exportChartsToExcel} className="flex items-center gap-2">
+            <Download className="h-4 w-4" />
+            <span>Exportar Dashboard</span>
+          </Button>
         </div>
       </CardContent>
     </Card>
+  )
+
+  // Componente para botón de exportar gráfico
+  const ExportChartButton = ({
+    chartRef,
+    filename,
+  }: { chartRef: React.RefObject<HTMLDivElement>; filename: string }) => (
+    <Button
+      variant="outline"
+      size="sm"
+      className="absolute top-4 right-4 z-10"
+      onClick={() => exportChartAsImage(chartRef, filename)}
+    >
+      <Download className="h-4 w-4 mr-2" />
+      Exportar Gráfico
+    </Button>
   )
 
   return (
@@ -556,8 +656,9 @@ export default function Dashboard({ data }: DashboardProps) {
             </Card>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card className="col-span-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4" ref={summaryChartsRef}>
+            <Card className="col-span-1 relative">
+              <ExportChartButton chartRef={summaryChartsRef} filename="resumen_dashboard" />
               <CardHeader>
                 <CardTitle>Distribución por Familia</CardTitle>
                 <CardDescription>Cantidad por tipo de producto</CardDescription>
@@ -617,43 +718,46 @@ export default function Dashboard({ data }: DashboardProps) {
               <CardDescription>Distribución del inventario por fecha de vencimiento (LOTTABLE05)</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="h-[400px]">
-                <Bar
-                  data={{
-                    labels: expirationData.labels,
-                    datasets: [
-                      {
-                        label: "Cantidad",
-                        data: expirationData.values,
-                        backgroundColor: expirationData.labels.map((label, index) =>
-                          label === "Vencido" ? "rgba(239, 68, 68, 0.8)" : COLORS[index % COLORS.length],
-                        ),
-                        borderColor: expirationData.labels.map((label, index) =>
-                          label === "Vencido" ? "rgba(239, 68, 68, 1)" : BORDER_COLORS[index % BORDER_COLORS.length],
-                        ),
-                        borderWidth: 1,
-                      },
-                    ],
-                  }}
-                  options={{
-                    ...chartOptions,
-                    scales: {
-                      y: {
-                        beginAtZero: true,
-                        title: {
-                          display: true,
-                          text: "Cantidad",
+              <div className="relative">
+                <ExportChartButton chartRef={expirationChartRef} filename="analisis_vencimientos" />
+                <div className="h-[400px]" ref={expirationChartRef}>
+                  <Bar
+                    data={{
+                      labels: expirationData.labels,
+                      datasets: [
+                        {
+                          label: "Cantidad",
+                          data: expirationData.values,
+                          backgroundColor: expirationData.labels.map((label, index) =>
+                            label === "Vencido" ? "rgba(239, 68, 68, 0.8)" : COLORS[index % COLORS.length],
+                          ),
+                          borderColor: expirationData.labels.map((label, index) =>
+                            label === "Vencido" ? "rgba(239, 68, 68, 1)" : BORDER_COLORS[index % BORDER_COLORS.length],
+                          ),
+                          borderWidth: 1,
+                        },
+                      ],
+                    }}
+                    options={{
+                      ...chartOptions,
+                      scales: {
+                        y: {
+                          beginAtZero: true,
+                          title: {
+                            display: true,
+                            text: "Cantidad",
+                          },
+                        },
+                        x: {
+                          title: {
+                            display: true,
+                            text: "Período de vencimiento",
+                          },
                         },
                       },
-                      x: {
-                        title: {
-                          display: true,
-                          text: "Período de vencimiento",
-                        },
-                      },
-                    },
-                  }}
-                />
+                    }}
+                  />
+                </div>
               </div>
 
               <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -712,34 +816,37 @@ export default function Dashboard({ data }: DashboardProps) {
           <Card>
             <CardHeader>
               <CardTitle>Distribución por Familia</CardTitle>
-              <CardDescription>Análisis del inventario por familia de productos (LOTTABLE08)</CardDescription>
+              <CardDescription>Análisis del inventario por familia de productos (LOTTABLE07)</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="h-[400px]">
-                  <Pie
-                    data={{
-                      labels: familyDistribution.labels,
-                      datasets: [
-                        {
-                          data: familyDistribution.values,
-                          backgroundColor: COLORS,
-                          borderColor: BORDER_COLORS,
-                          borderWidth: 1,
+                <div className="relative">
+                  <ExportChartButton chartRef={familyChartRef} filename="distribucion_familias" />
+                  <div className="h-[400px]" ref={familyChartRef}>
+                    <Pie
+                      data={{
+                        labels: familyDistribution.labels,
+                        datasets: [
+                          {
+                            data: familyDistribution.values,
+                            backgroundColor: COLORS,
+                            borderColor: BORDER_COLORS,
+                            borderWidth: 1,
+                          },
+                        ],
+                      }}
+                      options={{
+                        ...chartOptions,
+                        plugins: {
+                          ...chartOptions.plugins,
+                          legend: {
+                            position: "right",
+                            align: "center",
+                          },
                         },
-                      ],
-                    }}
-                    options={{
-                      ...chartOptions,
-                      plugins: {
-                        ...chartOptions.plugins,
-                        legend: {
-                          position: "right",
-                          align: "center",
-                        },
-                      },
-                    }}
-                  />
+                      }}
+                    />
+                  </div>
                 </div>
 
                 <div>
@@ -783,21 +890,24 @@ export default function Dashboard({ data }: DashboardProps) {
                 <CardDescription>Distribución del inventario por tiempo de permanencia (AGING_DIAS)</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="h-[400px]">
-                  <PolarArea
-                    data={{
-                      labels: agingData.labels,
-                      datasets: [
-                        {
-                          data: agingData.values,
-                          backgroundColor: COLORS.map((color) => color.replace("0.8", "0.7")),
-                          borderColor: BORDER_COLORS,
-                          borderWidth: 1,
-                        },
-                      ],
-                    }}
-                    options={chartOptions}
-                  />
+                <div className="relative">
+                  <ExportChartButton chartRef={agingChartRef} filename="analisis_aging" />
+                  <div className="h-[400px]" ref={agingChartRef}>
+                    <PolarArea
+                      data={{
+                        labels: agingData.labels,
+                        datasets: [
+                          {
+                            data: agingData.values,
+                            backgroundColor: COLORS.map((color) => color.replace("0.8", "0.7")),
+                            borderColor: BORDER_COLORS,
+                            borderWidth: 1,
+                          },
+                        ],
+                      }}
+                      options={chartOptions}
+                    />
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -906,40 +1016,43 @@ export default function Dashboard({ data }: DashboardProps) {
               <CardDescription>Análisis del inventario por ubicación en el almacén (LOC)</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="h-[400px]">
-                <Bar
-                  data={{
-                    labels: locationData.labels.map((label) => `RACK ${label}`),
-                    datasets: [
-                      {
-                        label: "Cantidad",
-                        data: locationData.values,
-                        backgroundColor: COLORS,
-                        borderColor: BORDER_COLORS,
-                        borderWidth: 1,
-                      },
-                    ],
-                  }}
-                  options={{
-                    ...chartOptions,
-                    indexAxis: "y" as const,
-                    scales: {
-                      x: {
-                        beginAtZero: true,
-                        title: {
-                          display: true,
-                          text: "Cantidad",
+              <div className="relative">
+                <ExportChartButton chartRef={locationChartRef} filename="distribucion_ubicaciones" />
+                <div className="h-[400px]" ref={locationChartRef}>
+                  <Bar
+                    data={{
+                      labels: locationData.labels.map((label) => `RACK ${label}`),
+                      datasets: [
+                        {
+                          label: "Cantidad",
+                          data: locationData.values,
+                          backgroundColor: COLORS,
+                          borderColor: BORDER_COLORS,
+                          borderWidth: 1,
+                        },
+                      ],
+                    }}
+                    options={{
+                      ...chartOptions,
+                      indexAxis: "y" as const,
+                      scales: {
+                        x: {
+                          beginAtZero: true,
+                          title: {
+                            display: true,
+                            text: "Cantidad",
+                          },
+                        },
+                        y: {
+                          title: {
+                            display: true,
+                            text: "Ubicación",
+                          },
                         },
                       },
-                      y: {
-                        title: {
-                          display: true,
-                          text: "Ubicación",
-                        },
-                      },
-                    },
-                  }}
-                />
+                    }}
+                  />
+                </div>
               </div>
 
               <div className="mt-6">
