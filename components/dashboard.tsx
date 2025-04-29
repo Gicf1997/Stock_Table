@@ -30,6 +30,9 @@ import { Label } from "@/components/ui/label"
 import * as XLSX from "xlsx"
 import * as htmlToImage from "html-to-image"
 
+// Importar el componente Heatmap
+import Heatmap from "@/components/heatmap"
+
 // Registrar los componentes de Chart.js
 ChartJS.register(
   CategoryScale,
@@ -76,22 +79,27 @@ const BORDER_COLORS = [
   "rgba(208, 237, 87, 1)",
 ]
 
-// Función para obtener el prefijo de ubicación según las nuevas reglas
+// Modificar la función getLocationPrefix para que tenga en cuenta la estructura de ubicaciones proporcionada
 function getLocationPrefix(location: any): string {
   if (!location) return "DESCONOCIDO"
 
   const locString = String(location)
 
-  // Si comienza con letra, tomar 3 caracteres
-  if (/^[a-zA-Z]/.test(locString)) {
-    return locString.substring(0, 3)
+  // Ubicaciones especiales
+  if (locString.startsWith("M")) {
+    return "EXPEDICIÓN"
+  } else if (locString.startsWith("PACK") || locString.startsWith("CHECK")) {
+    return "EMPAQUETADO"
+  } else if (locString.startsWith("STAGE")) {
+    return "ESPERA"
   }
-  // Si comienza con número, tomar 2 caracteres
-  else if (/^[0-9]/.test(locString)) {
-    return locString.substring(0, 2)
+  // Ubicaciones con formato estándar C480310
+  else if (/^[A-Z][0-9]{2}/.test(locString)) {
+    // Extraer el Rack (los dos dígitos después de la letra)
+    return locString.substring(0, 3) // Devuelve el bloque + número de rack (ej: C48)
   }
 
-  // Caso por defecto
+  // Caso por defecto para otros formatos
   return locString.substring(0, 3)
 }
 
@@ -538,7 +546,7 @@ export default function Dashboard({ data }: DashboardProps) {
     }
   }
 
-  // Reemplazar el componente FilterControls con esta nueva versión que solo incluye filtros por SKU, Familia y Aging
+  // Modificar la función FilterControls para corregir el bug del filtro de SKU
   const FilterControls = () => (
     <Card className="mb-4">
       <CardHeader className="pb-2">
@@ -554,6 +562,7 @@ export default function Dashboard({ data }: DashboardProps) {
               placeholder="Filtrar por SKU"
               value={skuFilter}
               onChange={(e) => setSkuFilter(e.target.value)}
+              type="text"
             />
           </div>
 
@@ -672,7 +681,6 @@ export default function Dashboard({ data }: DashboardProps) {
           <TabsTrigger value="ubicaciones">Ubicaciones</TabsTrigger>
           <TabsTrigger value="lotes">Lotes</TabsTrigger>
         </TabsList>
-
         <TabsContent value="resumen" className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card>
@@ -775,7 +783,6 @@ export default function Dashboard({ data }: DashboardProps) {
             </Card>
           </div>
         </TabsContent>
-
         <TabsContent value="vencimientos">
           <Card>
             <CardHeader>
@@ -876,7 +883,6 @@ export default function Dashboard({ data }: DashboardProps) {
             </CardContent>
           </Card>
         </TabsContent>
-
         <TabsContent value="familias">
           <Card>
             <CardHeader>
@@ -946,7 +952,6 @@ export default function Dashboard({ data }: DashboardProps) {
             </CardContent>
           </Card>
         </TabsContent>
-
         <TabsContent value="aging">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card>
@@ -1073,110 +1078,113 @@ export default function Dashboard({ data }: DashboardProps) {
             </CardContent>
           </Card>
         </TabsContent>
-
+        // Modificar la pestaña de ubicaciones para incluir el mapa de calor
         <TabsContent value="ubicaciones">
-          <Card>
-            <CardHeader>
-              <CardTitle>Distribución por Ubicación</CardTitle>
-              <CardDescription>Análisis de ubicaciones ocupadas en el almacén (LOC)</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="relative">
-                <ExportChartButton chartRef={locationChartRef} filename="distribucion_ubicaciones" />
-                <div className="h-[400px]" ref={locationChartRef}>
-                  <Bar
-                    data={{
-                      labels: locationData.labels.map((label) => `RACK ${label}`),
-                      datasets: [
-                        {
-                          label: "Ubicaciones ocupadas",
-                          data: locationData.values,
-                          backgroundColor: COLORS,
-                          borderColor: BORDER_COLORS,
-                          borderWidth: 1,
-                        },
-                      ],
-                    }}
-                    options={{
-                      ...chartOptions,
-                      indexAxis: "y" as const,
-                      scales: {
-                        x: {
-                          beginAtZero: true,
-                          title: {
-                            display: true,
-                            text: "Cantidad de ubicaciones",
+          <div className="space-y-4">
+            <Heatmap data={filteredData} />
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Distribución por Ubicación</CardTitle>
+                <CardDescription>Análisis de ubicaciones ocupadas en el almacén (LOC)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="relative">
+                  <ExportChartButton chartRef={locationChartRef} filename="distribucion_ubicaciones" />
+                  <div className="h-[400px]" ref={locationChartRef}>
+                    <Bar
+                      data={{
+                        labels: locationData.labels.map((label) => `RACK ${label}`),
+                        datasets: [
+                          {
+                            label: "Ubicaciones ocupadas",
+                            data: locationData.values,
+                            backgroundColor: COLORS,
+                            borderColor: BORDER_COLORS,
+                            borderWidth: 1,
+                          },
+                        ],
+                      }}
+                      options={{
+                        ...chartOptions,
+                        indexAxis: "y" as const,
+                        scales: {
+                          x: {
+                            beginAtZero: true,
+                            title: {
+                              display: true,
+                              text: "Cantidad de ubicaciones",
+                            },
+                          },
+                          y: {
+                            title: {
+                              display: true,
+                              text: "Ubicación",
+                            },
                           },
                         },
-                        y: {
-                          title: {
-                            display: true,
-                            text: "Ubicación",
-                          },
-                        },
-                      },
-                    }}
-                  />
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="mt-6">
-                <h3 className="text-lg font-medium mb-2">Análisis de Ubicaciones</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Este gráfico muestra la distribución de ubicaciones ocupadas en el almacén. Las ubicaciones están
-                  agrupadas según el prefijo del código de ubicación.
-                </p>
+                <div className="mt-6">
+                  <h3 className="text-lg font-medium mb-2">Análisis de Ubicaciones</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Este gráfico muestra la distribución de ubicaciones ocupadas en el almacén. Las ubicaciones están
+                    agrupadas según el prefijo del código de ubicación.
+                  </p>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    {locationData.raw.slice(0, 5).map((item, index) => (
-                      <div key={index} className="flex justify-between items-center">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-3 h-3 rounded-full"
-                            style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                          />
-                          <span>RACK {item.name}</span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      {locationData.raw.slice(0, 5).map((item, index) => (
+                        <div key={index} className="flex justify-between items-center">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-3 h-3 rounded-full"
+                              style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                            />
+                            <span>RACK {item.name}</span>
+                          </div>
+                          <span className="font-medium">{item.value.toLocaleString()} ubicaciones</span>
                         </div>
-                        <span className="font-medium">{item.value.toLocaleString()} ubicaciones</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-start gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5" />
-                      <span className="text-sm">
-                        El RACK {locationData.raw[0]?.name} contiene la mayor cantidad de ubicaciones ocupadas con{" "}
-                        {locationData.raw[0]?.value.toLocaleString()} ubicaciones.
-                      </span>
+                      ))}
                     </div>
 
-                    <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950 p-3 rounded-md border border-blue-200 dark:border-blue-800">
-                      <AlertCircle className="h-4 w-4 text-blue-500 mt-0.5" />
-                      <div className="text-sm">
-                        <p className="font-medium text-blue-700 dark:text-blue-300">SKU con mayor ocupación:</p>
-                        <p>
-                          El SKU <span className="font-bold">{locationData.maxOccupancySku}</span> ocupa el{" "}
-                          <span className="font-bold">{locationData.maxOccupancyPercentage}%</span> de todas las
-                          ubicaciones ({locationData.totalLocations} ubicaciones totales).
-                        </p>
+                    <div className="space-y-2">
+                      <div className="flex items-start gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5" />
+                        <span className="text-sm">
+                          El RACK {locationData.raw[0]?.name} contiene la mayor cantidad de ubicaciones ocupadas con{" "}
+                          {locationData.raw[0]?.value.toLocaleString()} ubicaciones.
+                        </span>
                       </div>
-                    </div>
 
-                    <div className="flex items-start gap-2">
-                      <Clock className="h-4 w-4 text-blue-500 mt-0.5" />
-                      <span className="text-sm">
-                        Considerar optimizar la distribución del inventario para mejorar la eficiencia de picking.
-                      </span>
+                      <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950 p-3 rounded-md border border-blue-200 dark:border-blue-800">
+                        <AlertCircle className="h-4 w-4 text-blue-500 mt-0.5" />
+                        <div className="text-sm">
+                          <p className="font-medium text-blue-700 dark:text-blue-300">SKU con mayor ocupación:</p>
+                          <p>
+                            El SKU <span className="font-bold">{locationData.maxOccupancySku}</span> ocupa el{" "}
+                            <span className="font-bold">{locationData.maxOccupancyPercentage}%</span> de todas las
+                            ubicaciones ({locationData.totalLocations} ubicaciones totales).
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-2">
+                        <Clock className="h-4 w-4 text-blue-500 mt-0.5" />
+                        <span className="text-sm">
+                          Considerar optimizar la distribución del inventario para mejorar la eficiencia de picking.
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
-
         <TabsContent value="lotes">
           <Card>
             <CardHeader>
