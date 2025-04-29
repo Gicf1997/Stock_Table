@@ -69,6 +69,7 @@ export default function JsonTable({ data }: JsonTableProps) {
         "DESCR",
         "PACKKEY",
         "LOC",
+        "ID",
         "QTY",
         "QTY_DISPO",
         "QTYALLOCATED",

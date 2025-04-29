@@ -104,6 +104,7 @@ export default function Dashboard({ data }: DashboardProps) {
   const agingChartRef = useRef<HTMLDivElement>(null)
   const locationChartRef = useRef<HTMLDivElement>(null)
   const summaryChartsRef = useRef<HTMLDivElement>(null)
+  const lotChartRef = useRef<HTMLDivElement>(null)
 
   // Filtros
   const [statusFilter, setStatusFilter] = useState<string>("TODOS")
@@ -325,23 +326,85 @@ export default function Dashboard({ data }: DashboardProps) {
     }
   }, [filteredData])
 
-  // Datos para el gráfico de ubicaciones
+  // Datos para el gráfico de ubicaciones (modificado para contar ubicaciones en lugar de unidades)
   const locationData = useMemo(() => {
     // Agrupar por ubicación
-    const locationGroups: Record<string, number> = {}
+    const locationGroups: Record<string, Set<string>> = {}
+    const skuLocationCount: Record<string, number> = {}
+    const totalLocations = new Set<string>()
 
+    // Contar ubicaciones únicas por prefijo y por SKU
     filteredData.forEach((item) => {
       if (!item.LOC) return
 
       // Obtener el prefijo según las nuevas reglas
       const locationPrefix = getLocationPrefix(item.LOC)
-      const quantity = Number(item.QTY) || 0
+      const sku = String(item.SKU || "DESCONOCIDO")
 
-      locationGroups[locationPrefix] = (locationGroups[locationPrefix] || 0) + quantity
+      // Inicializar conjuntos si no existen
+      if (!locationGroups[locationPrefix]) {
+        locationGroups[locationPrefix] = new Set<string>()
+      }
+
+      // Añadir la ubicación al conjunto del prefijo
+      locationGroups[locationPrefix].add(item.LOC)
+
+      // Añadir la ubicación al conjunto total
+      totalLocations.add(item.LOC)
+
+      // Contar ubicaciones por SKU
+      if (!skuLocationCount[sku]) {
+        skuLocationCount[sku] = 0
+      }
+      skuLocationCount[sku]++
     })
 
     // Ordenar y limitar para mejor visualización
     const sortedEntries = Object.entries(locationGroups)
+      .map(([prefix, locations]) => [prefix, locations.size])
+      .sort((a, b) => (b[1] as number) - (a[1] as number))
+      .slice(0, limitItems)
+
+    const labels = sortedEntries.map(([name]) => name as string)
+    const values = sortedEntries.map(([, value]) => value as number)
+
+    // Encontrar el SKU con mayor porcentaje de ocupación
+    const totalLocationCount = totalLocations.size
+    let maxOccupancySku = ""
+    let maxOccupancyPercentage = 0
+
+    Object.entries(skuLocationCount).forEach(([sku, count]) => {
+      const percentage = (count / totalLocationCount) * 100
+      if (percentage > maxOccupancyPercentage) {
+        maxOccupancyPercentage = percentage
+        maxOccupancySku = sku
+      }
+    })
+
+    return {
+      labels,
+      values,
+      raw: sortedEntries.map(([name, value]) => ({ name, value })),
+      totalLocations: totalLocations.size,
+      maxOccupancySku,
+      maxOccupancyPercentage: Math.round(maxOccupancyPercentage * 100) / 100,
+    }
+  }, [filteredData, limitItems])
+
+  // Datos para el gráfico de LOTTABLE02 (nuevo)
+  const lotData = useMemo(() => {
+    // Agrupar por lote (LOTTABLE02)
+    const lotGroups: Record<string, number> = {}
+
+    filteredData.forEach((item) => {
+      const lot = item.LOTTABLE02 || "SIN LOTE"
+      const quantity = Number(item.QTY) || 0
+
+      lotGroups[lot] = (lotGroups[lot] || 0) + quantity
+    })
+
+    // Ordenar y limitar para mejor visualización
+    const sortedEntries = Object.entries(lotGroups)
       .sort((a, b) => b[1] - a[1])
       .slice(0, limitItems)
 
@@ -428,6 +491,7 @@ export default function Dashboard({ data }: DashboardProps) {
         { ref: familyChartRef, name: "Familias" },
         { ref: agingChartRef, name: "Aging" },
         { ref: locationChartRef, name: "Ubicaciones" },
+        { ref: lotChartRef, name: "Lotes" },
       ]
 
       // Crear una hoja para los gráficos
@@ -600,12 +664,13 @@ export default function Dashboard({ data }: DashboardProps) {
       <FilterControls />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid grid-cols-2 md:grid-cols-5 w-full">
+        <TabsList className="grid grid-cols-2 md:grid-cols-6 w-full">
           <TabsTrigger value="resumen">Resumen</TabsTrigger>
           <TabsTrigger value="vencimientos">Vencimientos</TabsTrigger>
           <TabsTrigger value="familias">Familias</TabsTrigger>
           <TabsTrigger value="aging">Aging</TabsTrigger>
           <TabsTrigger value="ubicaciones">Ubicaciones</TabsTrigger>
+          <TabsTrigger value="lotes">Lotes</TabsTrigger>
         </TabsList>
 
         <TabsContent value="resumen" className="space-y-4">
@@ -1013,7 +1078,7 @@ export default function Dashboard({ data }: DashboardProps) {
           <Card>
             <CardHeader>
               <CardTitle>Distribución por Ubicación</CardTitle>
-              <CardDescription>Análisis del inventario por ubicación en el almacén (LOC)</CardDescription>
+              <CardDescription>Análisis de ubicaciones ocupadas en el almacén (LOC)</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="relative">
@@ -1024,7 +1089,7 @@ export default function Dashboard({ data }: DashboardProps) {
                       labels: locationData.labels.map((label) => `RACK ${label}`),
                       datasets: [
                         {
-                          label: "Cantidad",
+                          label: "Ubicaciones ocupadas",
                           data: locationData.values,
                           backgroundColor: COLORS,
                           borderColor: BORDER_COLORS,
@@ -1040,7 +1105,7 @@ export default function Dashboard({ data }: DashboardProps) {
                           beginAtZero: true,
                           title: {
                             display: true,
-                            text: "Cantidad",
+                            text: "Cantidad de ubicaciones",
                           },
                         },
                         y: {
@@ -1058,7 +1123,7 @@ export default function Dashboard({ data }: DashboardProps) {
               <div className="mt-6">
                 <h3 className="text-lg font-medium mb-2">Análisis de Ubicaciones</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Este gráfico muestra la distribución del inventario por ubicación en el almacén. Las ubicaciones están
+                  Este gráfico muestra la distribución de ubicaciones ocupadas en el almacén. Las ubicaciones están
                   agrupadas según el prefijo del código de ubicación.
                 </p>
 
@@ -1073,7 +1138,7 @@ export default function Dashboard({ data }: DashboardProps) {
                           />
                           <span>RACK {item.name}</span>
                         </div>
-                        <span className="font-medium">{item.value.toLocaleString()}</span>
+                        <span className="font-medium">{item.value.toLocaleString()} ubicaciones</span>
                       </div>
                     ))}
                   </div>
@@ -1082,15 +1147,155 @@ export default function Dashboard({ data }: DashboardProps) {
                     <div className="flex items-start gap-2">
                       <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5" />
                       <span className="text-sm">
-                        El RACK {locationData.raw[0]?.name} contiene la mayor cantidad de inventario con{" "}
-                        {locationData.raw[0]?.value.toLocaleString()} unidades.
+                        El RACK {locationData.raw[0]?.name} contiene la mayor cantidad de ubicaciones ocupadas con{" "}
+                        {locationData.raw[0]?.value.toLocaleString()} ubicaciones.
                       </span>
+                    </div>
+
+                    <div className="flex items-start gap-2 bg-blue-50 dark:bg-blue-950 p-3 rounded-md border border-blue-200 dark:border-blue-800">
+                      <AlertCircle className="h-4 w-4 text-blue-500 mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-medium text-blue-700 dark:text-blue-300">SKU con mayor ocupación:</p>
+                        <p>
+                          El SKU <span className="font-bold">{locationData.maxOccupancySku}</span> ocupa el{" "}
+                          <span className="font-bold">{locationData.maxOccupancyPercentage}%</span> de todas las
+                          ubicaciones ({locationData.totalLocations} ubicaciones totales).
+                        </p>
+                      </div>
                     </div>
 
                     <div className="flex items-start gap-2">
                       <Clock className="h-4 w-4 text-blue-500 mt-0.5" />
                       <span className="text-sm">
                         Considerar optimizar la distribución del inventario para mejorar la eficiencia de picking.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="lotes">
+          <Card>
+            <CardHeader>
+              <CardTitle>Análisis por Lote</CardTitle>
+              <CardDescription>Distribución del inventario por lote (LOTTABLE02)</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="relative">
+                <ExportChartButton chartRef={lotChartRef} filename="analisis_lotes" />
+                <div className="h-[400px]" ref={lotChartRef}>
+                  <Bar
+                    data={{
+                      labels: lotData.labels,
+                      datasets: [
+                        {
+                          label: "Cantidad",
+                          data: lotData.values,
+                          backgroundColor: COLORS,
+                          borderColor: BORDER_COLORS,
+                          borderWidth: 1,
+                        },
+                      ],
+                    }}
+                    options={{
+                      ...chartOptions,
+                      scales: {
+                        y: {
+                          beginAtZero: true,
+                          title: {
+                            display: true,
+                            text: "Cantidad",
+                          },
+                        },
+                        x: {
+                          title: {
+                            display: true,
+                            text: "Lote",
+                          },
+                          ticks: {
+                            maxRotation: 45,
+                            minRotation: 45,
+                          },
+                        },
+                      },
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <h3 className="text-lg font-medium mb-2">Detalle por Lote</h3>
+                  <div className="max-h-[300px] overflow-y-auto pr-2">
+                    <table className="w-full">
+                      <thead className="sticky top-0 bg-background">
+                        <tr className="border-b">
+                          <th className="text-left py-2">Lote</th>
+                          <th className="text-right py-2">Cantidad</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lotData.raw.map((item, index) => (
+                          <tr key={index} className="border-b border-muted">
+                            <td className="py-2">{item.name}</td>
+                            <td className="text-right py-2">{item.value.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-lg font-medium mb-2">Análisis de Lotes</h3>
+                  <div className="space-y-4">
+                    <div className="bg-green-50 dark:bg-green-950 p-3 rounded-md border border-green-200 dark:border-green-800">
+                      <div className="flex items-start gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5" />
+                        <div className="text-sm">
+                          <p className="font-medium text-green-700 dark:text-green-300">Lote principal:</p>
+                          <p>
+                            El lote <span className="font-bold">{lotData.raw[0]?.name}</span> representa{" "}
+                            <span className="font-bold">
+                              {lotData.raw[0]?.value
+                                ? ((lotData.raw[0].value / summaryData.totalQuantity) * 100).toFixed(2)
+                                : 0}
+                              %
+                            </span>{" "}
+                            del inventario total.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-amber-50 dark:bg-amber-950 p-3 rounded-md border border-amber-200 dark:border-amber-800">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5" />
+                        <div className="text-sm">
+                          <p className="font-medium text-amber-700 dark:text-amber-300">Diversidad de lotes:</p>
+                          <p>
+                            Hay un total de{" "}
+                            <span className="font-bold">
+                              {Object.keys(
+                                filteredData.reduce((acc: Record<string, boolean>, item) => {
+                                  if (item.LOTTABLE02) acc[item.LOTTABLE02] = true
+                                  return acc
+                                }, {}),
+                              ).length.toLocaleString()}
+                            </span>{" "}
+                            lotes diferentes en el inventario.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2">
+                      <Clock className="h-4 w-4 text-blue-500 mt-0.5" />
+                      <span className="text-sm">
+                        Monitorear la distribución por lotes para identificar patrones de producción y consumo.
                       </span>
                     </div>
                   </div>
