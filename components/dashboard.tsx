@@ -30,8 +30,8 @@ import { Label } from "@/components/ui/label"
 import * as XLSX from "xlsx"
 import * as htmlToImage from "html-to-image"
 
-// Importar el componente Heatmap
-import Heatmap from "@/components/heatmap"
+// Importar el nuevo componente HeatmapChart en lugar del Heatmap
+import HeatmapChart from "@/components/heatmap-chart"
 
 // Registrar los componentes de Chart.js
 ChartJS.register(
@@ -682,7 +682,7 @@ export default function Dashboard({ data }: DashboardProps) {
     <Button
       variant="outline"
       size="sm"
-      className="absolute top-4 right-4 z-10"
+      className="absolute top-4 left-4 z-10"
       onClick={() => exportChartAsImage(chartRef, filename)}
     >
       <Download className="h-4 w-4 mr-2" />
@@ -1100,9 +1100,10 @@ export default function Dashboard({ data }: DashboardProps) {
             </CardContent>
           </Card>
         </TabsContent>
+        // Modificar la pestaña de ubicaciones para incluir el mapa de calor
         <TabsContent value="ubicaciones">
           <div className="space-y-4">
-            <Heatmap data={filteredData} />
+            <HeatmapChart data={filteredData} />
 
             <Card>
               <CardHeader>

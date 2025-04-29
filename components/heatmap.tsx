@@ -3,35 +3,26 @@
 import { useMemo } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  Title,
+  Tooltip,
+  Legend,
+  type ChartData,
+  type ChartOptions,
+} from "chart.js"
+import { Scatter } from "react-chartjs-2"
 
-interface HeatmapProps {
+// Registrar los componentes necesarios de Chart.js
+ChartJS.register(CategoryScale, LinearScale, PointElement, Title, Tooltip, Legend)
+
+interface HeatmapChartProps {
   data: any[]
   title?: string
   description?: string
-}
-
-// Función para obtener el color basado en el valor
-function getHeatColor(value: number, max: number): string {
-  // Escala de colores de frío a caliente
-  const ratio = value / max
-
-  if (ratio < 0.2) return "bg-blue-100 dark:bg-blue-950 border-blue-200 dark:border-blue-900"
-  if (ratio < 0.4) return "bg-green-100 dark:bg-green-950 border-green-200 dark:border-green-900"
-  if (ratio < 0.6) return "bg-yellow-100 dark:bg-yellow-950 border-yellow-200 dark:border-yellow-900"
-  if (ratio < 0.8) return "bg-orange-100 dark:bg-orange-950 border-orange-200 dark:border-orange-900"
-  return "bg-red-100 dark:bg-red-950 border-red-200 dark:border-red-900"
-}
-
-// Función para obtener el color de texto basado en el valor
-function getTextColor(value: number, max: number): string {
-  const ratio = value / max
-
-  if (ratio < 0.2) return "text-blue-700 dark:text-blue-300"
-  if (ratio < 0.4) return "text-green-700 dark:text-green-300"
-  if (ratio < 0.6) return "text-yellow-700 dark:text-yellow-300"
-  if (ratio < 0.8) return "text-orange-700 dark:text-orange-300"
-  return "text-red-700 dark:text-red-300"
 }
 
 // Función para extraer información de ubicación
@@ -67,16 +58,17 @@ function classifyLocation(location: string): string {
   return "OTRO"
 }
 
-export default function Heatmap({
+export default function HeatmapChart({
   data,
   title = "Mapa de Calor por Rack",
   description = "Distribución de ubicaciones ocupadas por rack",
-}: HeatmapProps) {
+}: HeatmapChartProps) {
   // Procesar datos para el mapa de calor
-  const heatmapData = useMemo(() => {
+  const { heatmapData, locationTypes, maxCount } = useMemo(() => {
     // Agrupar ubicaciones por rack
     const rackGroups: Record<string, Set<string>> = {}
     const rackItems: Record<string, number> = {}
+    const rackCoordinates: Record<string, { x: number; y: number; r: number; count: number; items: number }[]> = {}
 
     // Contar ubicaciones únicas por rack y cantidad de items
     data.forEach((item) => {
@@ -87,10 +79,40 @@ export default function Heatmap({
       if (!rackGroups[rackKey]) {
         rackGroups[rackKey] = new Set<string>()
         rackItems[rackKey] = 0
+        rackCoordinates[rackKey] = []
       }
 
       rackGroups[rackKey].add(item.LOC)
       rackItems[rackKey] += Number(item.QTY) || 0
+
+      // Intentar extraer coordenadas para visualización
+      const parsed = parseLocation(item.LOC)
+      if (parsed) {
+        const x = Number.parseInt(parsed.horizontal)
+        const y = Number.parseInt(parsed.vertical)
+
+        // Buscar si ya existe un punto en estas coordenadas
+        let found = false
+        for (const point of rackCoordinates[rackKey]) {
+          if (point.x === x && point.y === y) {
+            point.count++
+            point.items += Number(item.QTY) || 0
+            point.r = Math.min(25, 5 + point.count * 2) // Ajustar radio basado en la cantidad
+            found = true
+            break
+          }
+        }
+
+        if (!found) {
+          rackCoordinates[rackKey].push({
+            x,
+            y,
+            r: 5, // Radio inicial
+            count: 1,
+            items: Number(item.QTY) || 0,
+          })
+        }
+      }
     })
 
     // Convertir a formato para visualización
@@ -98,19 +120,16 @@ export default function Heatmap({
       rack,
       count: locations.size,
       items: rackItems[rack],
+      coordinates: rackCoordinates[rack] || [],
     }))
 
     // Ordenar por cantidad de ubicaciones
-    return result.sort((a, b) => b.count - a.count)
-  }, [data])
+    const sortedResult = result.sort((a, b) => b.count - a.count)
 
-  // Encontrar el valor máximo para la escala de colores
-  const maxCount = useMemo(() => {
-    return Math.max(...heatmapData.map((item) => item.count), 1)
-  }, [heatmapData])
+    // Encontrar el valor máximo para la escala de colores
+    const maxCount = Math.max(...result.map((item) => item.count), 1)
 
-  // Agrupar por tipo de ubicación
-  const locationTypes = useMemo(() => {
+    // Agrupar por tipo de ubicación
     const types: Record<string, number> = {
       ALMACÉN: 0,
       EXPEDICIÓN: 0,
@@ -119,7 +138,7 @@ export default function Heatmap({
       OTRO: 0,
     }
 
-    heatmapData.forEach((item) => {
+    sortedResult.forEach((item) => {
       if (item.rack.startsWith("EXPEDICIÓN")) {
         types["EXPEDICIÓN"] += item.count
       } else if (item.rack.startsWith("EMPAQUETADO")) {
@@ -133,8 +152,116 @@ export default function Heatmap({
       }
     })
 
-    return types
+    return { heatmapData: sortedResult, locationTypes: types, maxCount }
+  }, [data])
+
+  // Preparar datos para Chart.js
+  const chartData: ChartData<"scatter"> = useMemo(() => {
+    // Tomar solo los 10 racks principales para la visualización
+    const topRacks = heatmapData.slice(0, 10)
+
+    return {
+      datasets: topRacks.map((rack, index) => {
+        // Colores para los diferentes racks
+        const colors = [
+          "rgba(136, 132, 216, 0.8)",
+          "rgba(130, 202, 157, 0.8)",
+          "rgba(255, 198, 88, 0.8)",
+          "rgba(255, 128, 66, 0.8)",
+          "rgba(0, 136, 254, 0.8)",
+          "rgba(0, 196, 159, 0.8)",
+          "rgba(255, 187, 40, 0.8)",
+          "rgba(255, 128, 66, 0.8)",
+          "rgba(164, 222, 108, 0.8)",
+          "rgba(208, 237, 87, 0.8)",
+        ]
+
+        // Si no hay coordenadas específicas, crear puntos simulados
+        let points = rack.coordinates
+
+        if (points.length === 0) {
+          // Crear puntos simulados para racks sin coordenadas específicas
+          points = Array.from({ length: Math.min(rack.count, 20) }, (_, i) => ({
+            x: (i % 5) + 1,
+            y: Math.floor(i / 5) + 1,
+            r: 10,
+            count: Math.ceil(rack.count / 20),
+            items: Math.ceil(rack.items / 20),
+          }))
+        }
+
+        return {
+          label: `RACK ${rack.rack}`,
+          data: points.map((point) => ({
+            x: point.x,
+            y: point.y,
+            r: point.r,
+          })),
+          backgroundColor: colors[index % colors.length],
+          borderColor: colors[index % colors.length].replace("0.8", "1"),
+          borderWidth: 1,
+          pointRadius: points.map((p) => p.r),
+          pointHoverRadius: points.map((p) => p.r + 2),
+        }
+      }),
+    }
   }, [heatmapData])
+
+  // Opciones para el gráfico
+  const chartOptions: ChartOptions<"scatter"> = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      x: {
+        title: {
+          display: true,
+          text: "Posición Horizontal",
+        },
+        min: 0,
+        max: 20,
+        ticks: {
+          stepSize: 1,
+        },
+      },
+      y: {
+        title: {
+          display: true,
+          text: "Posición Vertical",
+        },
+        min: 0,
+        max: 20,
+        ticks: {
+          stepSize: 1,
+        },
+      },
+    },
+    plugins: {
+      tooltip: {
+        callbacks: {
+          label: (context) => {
+            const dataIndex = context.dataIndex
+            const datasetIndex = context.datasetIndex
+            const rack = heatmapData[datasetIndex]
+            const point = rack.coordinates[dataIndex] || { count: 0, items: 0 }
+
+            return [
+              `RACK: ${rack.rack}`,
+              `Posición: (${context.parsed.x}, ${context.parsed.y})`,
+              `Ubicaciones: ${point.count}`,
+              `Unidades: ${point.items}`,
+            ]
+          },
+        },
+      },
+      legend: {
+        position: "top",
+      },
+      title: {
+        display: true,
+        text: "Distribución de Ubicaciones en Almacén",
+      },
+    },
+  }
 
   return (
     <Card>
@@ -154,50 +281,20 @@ export default function Heatmap({
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-          <TooltipProvider>
-            {heatmapData.map((item) => (
-              <Tooltip key={item.rack}>
-                <TooltipTrigger asChild>
-                  <div className={`p-3 rounded-md border ${getHeatColor(item.count, maxCount)} cursor-help`}>
-                    <div className="font-medium text-sm">{item.rack}</div>
-                    <div className={`text-lg font-bold ${getTextColor(item.count, maxCount)}`}>{item.count}</div>
-                    <div className="text-xs text-muted-foreground">{item.items.toLocaleString()} unidades</div>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <div className="text-sm">
-                    <div className="font-bold">{item.rack}</div>
-                    <div>{item.count} ubicaciones ocupadas</div>
-                    <div>{item.items.toLocaleString()} unidades en inventario</div>
-                    <div>{(item.items / item.count).toFixed(1)} unidades/ubicación</div>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            ))}
-          </TooltipProvider>
+        <div className="h-[500px]">
+          <Scatter data={chartData} options={chartOptions} />
         </div>
 
-        <div className="mt-6 flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-            <span className="text-xs">Baja ocupación</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-green-500"></div>
-            <span className="text-xs">Media-baja</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-            <span className="text-xs">Media</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-orange-500"></div>
-            <span className="text-xs">Media-alta</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-red-500"></div>
-            <span className="text-xs">Alta ocupación</span>
+        <div className="mt-6">
+          <h3 className="text-lg font-medium mb-2">Análisis de Racks</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+            {heatmapData.slice(0, 10).map((item, index) => (
+              <div key={item.rack} className="p-3 rounded-md border bg-card">
+                <div className="font-medium text-sm">RACK {item.rack}</div>
+                <div className="text-lg font-bold">{item.count} ubicaciones</div>
+                <div className="text-xs text-muted-foreground">{item.items.toLocaleString()} unidades</div>
+              </div>
+            ))}
           </div>
         </div>
       </CardContent>
