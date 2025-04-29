@@ -21,6 +21,10 @@ import {
   RadialLinearScale,
 } from "chart.js"
 import { Bar, Pie, Doughnut, Line, PolarArea } from "react-chartjs-2"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 
 // Registrar los componentes de Chart.js
 ChartJS.register(
@@ -68,17 +72,107 @@ const BORDER_COLORS = [
   "rgba(208, 237, 87, 1)",
 ]
 
+// Función para obtener el prefijo de ubicación según las nuevas reglas
+function getLocationPrefix(location: any): string {
+  if (!location) return "DESCONOCIDO"
+
+  const locString = String(location)
+
+  // Si comienza con letra, tomar 3 caracteres
+  if (/^[a-zA-Z]/.test(locString)) {
+    return locString.substring(0, 3)
+  }
+  // Si comienza con número, tomar 2 caracteres
+  else if (/^[0-9]/.test(locString)) {
+    return locString.substring(0, 2)
+  }
+
+  // Caso por defecto
+  return locString.substring(0, 3)
+}
+
 export default function Dashboard({ data }: DashboardProps) {
   const [activeTab, setActiveTab] = useState("resumen")
 
+  // Filtros
+  const [statusFilter, setStatusFilter] = useState<string>("TODOS")
+  const [familyFilter, setFamilyFilter] = useState<string>("TODAS")
+  const [locationFilter, setLocationFilter] = useState<string>("TODOS")
+  const [minAgingFilter, setMinAgingFilter] = useState<string>("")
+  const [maxAgingFilter, setMaxAgingFilter] = useState<string>("")
+  const [limitItems, setLimitItems] = useState<number>(10)
+
+  // Obtener valores únicos para filtros
+  const uniqueStatuses = useMemo(() => {
+    const statuses = new Set<string>()
+    data.forEach((item) => {
+      if (item.STATUS) statuses.add(item.STATUS)
+    })
+    return Array.from(statuses)
+  }, [data])
+
+  const uniqueFamilies = useMemo(() => {
+    const families = new Set<string>()
+    data.forEach((item) => {
+      if (item.LOTTABLE08) families.add(item.LOTTABLE08)
+    })
+    return Array.from(families)
+  }, [data])
+
+  const uniqueLocations = useMemo(() => {
+    const locations = new Set<string>()
+    data.forEach((item) => {
+      if (item.LOC) {
+        const prefix = getLocationPrefix(item.LOC)
+        locations.add(prefix)
+      }
+    })
+    return Array.from(locations)
+  }, [data])
+
+  // Aplicar filtros a los datos
+  const filteredData = useMemo(() => {
+    return data.filter((item) => {
+      // Filtro por estado
+      if (statusFilter !== "TODOS" && item.STATUS !== statusFilter) {
+        return false
+      }
+
+      // Filtro por familia
+      if (familyFilter !== "TODAS" && item.LOTTABLE08 !== familyFilter) {
+        return false
+      }
+
+      // Filtro por ubicación
+      if (locationFilter !== "TODOS" && item.LOC) {
+        const prefix = getLocationPrefix(item.LOC)
+        if (prefix !== locationFilter) {
+          return false
+        }
+      }
+
+      // Filtro por aging mínimo
+      if (minAgingFilter && Number(item.AGING_DIAS) < Number(minAgingFilter)) {
+        return false
+      }
+
+      // Filtro por aging máximo
+      if (maxAgingFilter && Number(item.AGING_DIAS) > Number(maxAgingFilter)) {
+        return false
+      }
+
+      return true
+    })
+  }, [data, statusFilter, familyFilter, locationFilter, minAgingFilter, maxAgingFilter])
+
   // Datos para el resumen
   const summaryData = useMemo(() => {
-    const totalItems = data.length
-    const totalQuantity = data.reduce((sum, item) => sum + (Number(item.QTY) || 0), 0)
-    const totalWeight = data.reduce((sum, item) => sum + (Number(item.NETWGT) || 0), 0)
+    const totalItems = filteredData.length
+    const totalQuantity = filteredData.reduce((sum, item) => sum + (Number(item.QTY) || 0), 0)
+    const totalWeight = filteredData.reduce((sum, item) => sum + (Number(item.NETWGT) || 0), 0)
 
     // Contar por estado
-    const statusCount = data.reduce((acc: Record<string, number>, item) => {
+    const statusCount = filteredData.reduce((acc: Record<string, number>, item) => {
       const status = item.STATUS || "DESCONOCIDO"
       acc[status] = (acc[status] || 0) + 1
       return acc
@@ -90,7 +184,7 @@ export default function Dashboard({ data }: DashboardProps) {
       totalWeight,
       statusCount,
     }
-  }, [data])
+  }, [filteredData])
 
   // Datos para el gráfico de vencimientos
   const expirationData = useMemo(() => {
@@ -106,7 +200,7 @@ export default function Dashboard({ data }: DashboardProps) {
       "> 365 días": 0,
     }
 
-    data.forEach((item) => {
+    filteredData.forEach((item) => {
       if (!item.LOTTABLE05) return
 
       try {
@@ -143,24 +237,24 @@ export default function Dashboard({ data }: DashboardProps) {
       values,
       raw: Object.entries(expirationGroups).map(([name, value]) => ({ name, value })),
     }
-  }, [data])
+  }, [filteredData])
 
   // Datos para el gráfico de distribución por familia
   const familyDistribution = useMemo(() => {
     // Agrupar por familia (LOTTABLE08)
     const familyGroups: Record<string, number> = {}
 
-    data.forEach((item) => {
+    filteredData.forEach((item) => {
       const family = item.LOTTABLE08 || "SIN CLASIFICAR"
       const quantity = Number(item.QTY) || 0
 
       familyGroups[family] = (familyGroups[family] || 0) + quantity
     })
 
-    // Ordenar y limitar a 10 para mejor visualización
+    // Ordenar y limitar para mejor visualización
     const sortedEntries = Object.entries(familyGroups)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
+      .slice(0, limitItems)
 
     const labels = sortedEntries.map(([name]) => name)
     const values = sortedEntries.map(([, value]) => value)
@@ -170,7 +264,7 @@ export default function Dashboard({ data }: DashboardProps) {
       values,
       raw: sortedEntries.map(([name, value]) => ({ name, value })),
     }
-  }, [data])
+  }, [filteredData, limitItems])
 
   // Datos para el gráfico de aging
   const agingData = useMemo(() => {
@@ -183,7 +277,7 @@ export default function Dashboard({ data }: DashboardProps) {
       "> 90 días": 0,
     }
 
-    data.forEach((item) => {
+    filteredData.forEach((item) => {
       const agingDays = Number(item.AGING_DIAS) || 0
       const quantity = Number(item.QTY) || 0
 
@@ -209,27 +303,27 @@ export default function Dashboard({ data }: DashboardProps) {
       values,
       raw: Object.entries(agingGroups).map(([name, value]) => ({ name, value })),
     }
-  }, [data])
+  }, [filteredData])
 
   // Datos para el gráfico de ubicaciones
   const locationData = useMemo(() => {
     // Agrupar por ubicación
     const locationGroups: Record<string, number> = {}
 
-    data.forEach((item) => {
+    filteredData.forEach((item) => {
       if (!item.LOC) return
 
-      // Tomar solo los primeros caracteres para agrupar por zona
-      const locationPrefix = String(item.LOC).substring(0, 3)
+      // Obtener el prefijo según las nuevas reglas
+      const locationPrefix = getLocationPrefix(item.LOC)
       const quantity = Number(item.QTY) || 0
 
       locationGroups[locationPrefix] = (locationGroups[locationPrefix] || 0) + quantity
     })
 
-    // Ordenar y limitar a 10 para mejor visualización
+    // Ordenar y limitar para mejor visualización
     const sortedEntries = Object.entries(locationGroups)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
+      .slice(0, limitItems)
 
     const labels = sortedEntries.map(([name]) => name)
     const values = sortedEntries.map(([, value]) => value)
@@ -239,7 +333,7 @@ export default function Dashboard({ data }: DashboardProps) {
       values,
       raw: sortedEntries.map(([name, value]) => ({ name, value })),
     }
-  }, [data])
+  }, [filteredData, limitItems])
 
   // Datos para el gráfico de tendencia de aging (simulado)
   const agingTrendData = useMemo(() => {
@@ -256,7 +350,8 @@ export default function Dashboard({ data }: DashboardProps) {
     }
 
     // Calcular el promedio de aging por día (simulado)
-    const avgAging = data.reduce((sum, item) => sum + (Number(item.AGING_DIAS) || 0), 0) / (data.length || 1)
+    const avgAging =
+      filteredData.reduce((sum, item) => sum + (Number(item.AGING_DIAS) || 0), 0) / (filteredData.length || 1)
 
     // Generar valores simulados alrededor del promedio
     for (let i = 0; i < 7; i++) {
@@ -265,7 +360,7 @@ export default function Dashboard({ data }: DashboardProps) {
     }
 
     return { labels, values }
-  }, [data])
+  }, [filteredData])
 
   // Opciones comunes para los gráficos
   const chartOptions = {
@@ -283,8 +378,127 @@ export default function Dashboard({ data }: DashboardProps) {
     },
   }
 
+  // Componente de filtros
+  const FilterControls = () => (
+    <Card className="mb-4">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg">Filtros</CardTitle>
+        <CardDescription>Personaliza la visualización de los datos</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="status-filter">Estado</Label>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger id="status-filter">
+                <SelectValue placeholder="Seleccionar estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="TODOS">Todos los estados</SelectItem>
+                {uniqueStatuses.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {status}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="family-filter">Familia</Label>
+            <Select value={familyFilter} onValueChange={setFamilyFilter}>
+              <SelectTrigger id="family-filter">
+                <SelectValue placeholder="Seleccionar familia" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="TODAS">Todas las familias</SelectItem>
+                {uniqueFamilies.map((family) => (
+                  <SelectItem key={family} value={family}>
+                    {family}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="location-filter">Rack</Label>
+            <Select value={locationFilter} onValueChange={setLocationFilter}>
+              <SelectTrigger id="location-filter">
+                <SelectValue placeholder="Seleccionar rack" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="TODOS">Todos los racks</SelectItem>
+                {uniqueLocations.map((location) => (
+                  <SelectItem key={location} value={location}>
+                    {location}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="min-aging">Aging mínimo (días)</Label>
+            <Input
+              id="min-aging"
+              type="number"
+              value={minAgingFilter}
+              onChange={(e) => setMinAgingFilter(e.target.value)}
+              placeholder="Mínimo"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="max-aging">Aging máximo (días)</Label>
+            <Input
+              id="max-aging"
+              type="number"
+              value={maxAgingFilter}
+              onChange={(e) => setMaxAgingFilter(e.target.value)}
+              placeholder="Máximo"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="limit-items">Límite de elementos</Label>
+            <Select value={limitItems.toString()} onValueChange={(value) => setLimitItems(Number(value))}>
+              <SelectTrigger id="limit-items">
+                <SelectValue placeholder="Límite de elementos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="5">5 elementos</SelectItem>
+                <SelectItem value="10">10 elementos</SelectItem>
+                <SelectItem value="15">15 elementos</SelectItem>
+                <SelectItem value="20">20 elementos</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="flex justify-end mt-4">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setStatusFilter("TODOS")
+              setFamilyFilter("TODAS")
+              setLocationFilter("TODOS")
+              setMinAgingFilter("")
+              setMaxAgingFilter("")
+              setLimitItems(10)
+            }}
+          >
+            Limpiar filtros
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+
   return (
     <div className="space-y-4">
+      <FilterControls />
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="grid grid-cols-2 md:grid-cols-5 w-full">
           <TabsTrigger value="resumen">Resumen</TabsTrigger>
@@ -695,7 +909,7 @@ export default function Dashboard({ data }: DashboardProps) {
               <div className="h-[400px]">
                 <Bar
                   data={{
-                    labels: locationData.labels.map((label) => `Zona ${label}`),
+                    labels: locationData.labels.map((label) => `RACK ${label}`),
                     datasets: [
                       {
                         label: "Cantidad",
@@ -732,7 +946,7 @@ export default function Dashboard({ data }: DashboardProps) {
                 <h3 className="text-lg font-medium mb-2">Análisis de Ubicaciones</h3>
                 <p className="text-sm text-muted-foreground mb-4">
                   Este gráfico muestra la distribución del inventario por ubicación en el almacén. Las ubicaciones están
-                  agrupadas por los primeros caracteres del código de ubicación.
+                  agrupadas según el prefijo del código de ubicación.
                 </p>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -744,7 +958,7 @@ export default function Dashboard({ data }: DashboardProps) {
                             className="w-3 h-3 rounded-full"
                             style={{ backgroundColor: COLORS[index % COLORS.length] }}
                           />
-                          <span>Zona {item.name}</span>
+                          <span>RACK {item.name}</span>
                         </div>
                         <span className="font-medium">{item.value.toLocaleString()}</span>
                       </div>
@@ -755,7 +969,7 @@ export default function Dashboard({ data }: DashboardProps) {
                     <div className="flex items-start gap-2">
                       <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5" />
                       <span className="text-sm">
-                        La zona {locationData.raw[0]?.name} contiene la mayor cantidad de inventario con{" "}
+                        El RACK {locationData.raw[0]?.name} contiene la mayor cantidad de inventario con{" "}
                         {locationData.raw[0]?.value.toLocaleString()} unidades.
                       </span>
                     </div>
