@@ -220,7 +220,7 @@ export default function Dashboard({ data }: DashboardProps) {
       if (!item.LOC) return
 
       // Tomar solo los primeros caracteres para agrupar por zona
-      const locationPrefix = item.LOC.substring(0, 3)
+      const locationPrefix = String(item.LOC).substring(0, 3)
       const quantity = Number(item.QTY) || 0
 
       locationGroups[locationPrefix] = (locationGroups[locationPrefix] || 0) + quantity
