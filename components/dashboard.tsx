@@ -547,110 +547,132 @@ export default function Dashboard({ data }: DashboardProps) {
   }
 
   // Modificar la función FilterControls para corregir el bug del filtro de SKU
-  const FilterControls = () => (
-    <Card className="mb-4">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-lg">Filtros</CardTitle>
-        <CardDescription>Personaliza la visualización de los datos</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="sku-filter">SKU</Label>
-            <Input
-              id="sku-filter"
-              placeholder="Filtrar por SKU"
-              value={skuFilter}
-              onChange={(e) => setSkuFilter(e.target.value)}
-              type="text"
-            />
-          </div>
+  const FilterControls = () => {
+    // Crear un estado local para el input de SKU
+    const [skuInputValue, setSkuInputValue] = useState(skuFilter)
 
-          <div className="space-y-2">
-            <Label htmlFor="family-filter">Familia</Label>
-            <Select value={familyFilter} onValueChange={setFamilyFilter}>
-              <SelectTrigger id="family-filter">
-                <SelectValue placeholder="Seleccionar familia" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="TODAS">Todas las familias</SelectItem>
-                {uniqueFamilies.map((family) => (
-                  <SelectItem key={family} value={family}>
-                    {family}
+    // Función para manejar el cambio en el input
+    const handleSkuChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value
+      setSkuInputValue(value)
+    }
+
+    // Función para aplicar el filtro cuando se presiona Enter o se pierde el foco
+    const applySkuFilter = () => {
+      setSkuFilter(skuInputValue)
+    }
+
+    return (
+      <Card className="mb-4">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Filtros</CardTitle>
+          <CardDescription>Personaliza la visualización de los datos</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="sku-filter">SKU</Label>
+              <Input
+                id="sku-filter"
+                placeholder="Filtrar por SKU"
+                value={skuInputValue}
+                onChange={handleSkuChange}
+                onBlur={applySkuFilter}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    applySkuFilter()
+                  }
+                }}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="family-filter">Familia</Label>
+              <Select value={familyFilter} onValueChange={setFamilyFilter}>
+                <SelectTrigger id="family-filter">
+                  <SelectValue placeholder="Seleccionar familia" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODAS">Todas las familias</SelectItem>
+                  {uniqueFamilies.map((family) => (
+                    <SelectItem key={family} value={family}>
+                      {family}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="aging-filter">Aging</Label>
+              <Select value={agingFilter} onValueChange={setAgingFilter}>
+                <SelectTrigger id="aging-filter">
+                  <SelectValue placeholder="Seleccionar rango de aging" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TODOS">Todos los rangos</SelectItem>
+                  <SelectItem value="< 7 días">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-[#b3b1e6]"></div>
+                      <span>{"< 7 días"}</span>
+                    </div>
                   </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                  <SelectItem value="7-30 días">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-[#82ca9d]"></div>
+                      <span>7-30 días</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="30-60 días">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-[#ffc658]"></div>
+                      <span>30-60 días</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="60-90 días">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-[#ff8042]"></div>
+                      <span>60-90 días</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="> 90 días">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-[#0088fe]"></div>
+                      <span>{"> 90 días"}</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="aging-filter">Aging</Label>
-            <Select value={agingFilter} onValueChange={setAgingFilter}>
-              <SelectTrigger id="aging-filter">
-                <SelectValue placeholder="Seleccionar rango de aging" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="TODOS">Todos los rangos</SelectItem>
-                <SelectItem value="< 7 días">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#b3b1e6]"></div>
-                    <span>{"< 7 días"}</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="7-30 días">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#82ca9d]"></div>
-                    <span>7-30 días</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="30-60 días">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#ffc658]"></div>
-                    <span>30-60 días</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="60-90 días">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#ff8042]"></div>
-                    <span>60-90 días</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="> 90 días">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#0088fe]"></div>
-                    <span>{"> 90 días"}</span>
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="flex flex-wrap justify-end gap-2 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSkuFilter("")
+                setSkuInputValue("")
+                setFamilyFilter("TODAS")
+                setAgingFilter("TODOS")
+              }}
+            >
+              Limpiar filtros
+            </Button>
+
+            <Button variant="outline" onClick={exportToExcel} className="flex items-center gap-2">
+              <FileSpreadsheet className="h-4 w-4" />
+              <span>Exportar a Excel</span>
+            </Button>
+
+            <Button variant="outline" onClick={exportChartsToExcel} className="flex items-center gap-2">
+              <Download className="h-4 w-4" />
+              <span>Exportar Dashboard</span>
+            </Button>
           </div>
-        </div>
-
-        <div className="flex flex-wrap justify-end gap-2 mt-4">
-          <Button
-            variant="outline"
-            onClick={() => {
-              setSkuFilter("")
-              setFamilyFilter("TODAS")
-              setAgingFilter("TODOS")
-            }}
-          >
-            Limpiar filtros
-          </Button>
-
-          <Button variant="outline" onClick={exportToExcel} className="flex items-center gap-2">
-            <FileSpreadsheet className="h-4 w-4" />
-            <span>Exportar a Excel</span>
-          </Button>
-
-          <Button variant="outline" onClick={exportChartsToExcel} className="flex items-center gap-2">
-            <Download className="h-4 w-4" />
-            <span>Exportar Dashboard</span>
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  )
+        </CardContent>
+      </Card>
+    )
+  }
 
   // Componente para botón de exportar gráfico
   const ExportChartButton = ({
@@ -1078,7 +1100,6 @@ export default function Dashboard({ data }: DashboardProps) {
             </CardContent>
           </Card>
         </TabsContent>
-        // Modificar la pestaña de ubicaciones para incluir el mapa de calor
         <TabsContent value="ubicaciones">
           <div className="space-y-4">
             <Heatmap data={filteredData} />
