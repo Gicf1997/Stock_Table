@@ -82,6 +82,36 @@ export default function JsonTable({ data }: JsonTableProps) {
     }
   }, [allColumns, visibleColumns])
 
+  // Datos para el gráfico de ubicaciones
+  const locationData = useMemo(() => {
+    // Agrupar por ubicación
+    const locationGroups: Record<string, number> = {}
+
+    data.forEach((item) => {
+      if (!item.LOC) return
+
+      // Verificar si LOC es una cadena antes de usar substring
+      const locationPrefix = typeof item.LOC === "string" ? item.LOC.substring(0, 3) : String(item.LOC)
+      const quantity = Number(item.QTY) || 0
+
+      locationGroups[locationPrefix] = (locationGroups[locationPrefix] || 0) + quantity
+    })
+
+    // Ordenar y limitar a 10 para mejor visualización
+    const sortedEntries = Object.entries(locationGroups)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+
+    const labels = sortedEntries.map(([name]) => name)
+    const values = sortedEntries.map(([, value]) => value)
+
+    return {
+      labels,
+      values,
+      raw: sortedEntries.map(([name, value]) => ({ name, value })),
+    }
+  }, [data])
+
   // Aplicar filtros a los datos
   const applyFilters = (item: any, filters: FilterConfig[]) => {
     return filters.every((filter) => {
@@ -219,8 +249,7 @@ export default function JsonTable({ data }: JsonTableProps) {
       })
       .join("\n")
 
-    // Combinar encabezados y filas
-    const csv = `${headers}\n${rows}`
+    const csv = headers + "\n" + rows
 
     // Crear y descargar el archivo
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
